@@ -1,17 +1,41 @@
 from datetime import date, datetime
 import os
-import pandas as pd
-import plotly.graph_objects as go
+import logging
+from time import perf_counter
+
+started = perf_counter()
+logger = logging.getLogger("matchedge.startup")
+logger.setLevel(logging.INFO)
+logger.info("MatchEdge: app script started")
 import streamlit as st
-from api import APIError, fixtures, history
-from model import result_prediction, count_prediction
-from backtest import completed_fixtures, walk_forward, evaluate
-from compare import compare_models
 
 st.set_page_config(page_title='MatchEdge | Soccer Predictions', page_icon='⚽', layout='wide')
 st.markdown('''<style>.block-container{padding-top:1.4rem}.stMetric{background:#12263a0c;border-radius:12px;padding:12px}</style>''', unsafe_allow_html=True)
 st.title('⚽ MatchEdge')
 st.caption('Live fixture lookup · historical form · probabilistic match, yellow-card and corner forecasts')
+st.success('Ready — data and prediction tools load only when you request them.')
+logger.info("MatchEdge: page shell rendered in %.3fs", perf_counter() - started)
+if st.query_params.get('diagnostics') == '1':
+    st.write('Page startup check passed. No API calls or prediction libraries were loaded.')
+    st.caption(f'Page startup: {perf_counter() - started:.3f} seconds')
+    st.stop()
+
+def load_tools():
+    tool_started = perf_counter()
+    logger.info("MatchEdge: loading prediction tools")
+    try:
+        import pandas as pd
+        import plotly.graph_objects as go
+        from api import APIError, fixtures, history
+        from model import result_prediction, count_prediction
+        from backtest import completed_fixtures, walk_forward, evaluate
+    except Exception:
+        logger.exception("MatchEdge: prediction tools failed to load")
+        st.error('The page is ready, but prediction tools could not load. Please check the app logs.')
+        st.stop()
+    logger.info("MatchEdge: prediction tools loaded in %.3fs", perf_counter() - tool_started)
+    return pd, go, APIError, fixtures, history, result_prediction, count_prediction, completed_fixtures, walk_forward, evaluate
+
 LEAGUES = {'UEFA Champions League':2, 'Europa League':3, 'Premier League':39,
            'La Liga':140, 'Serie A':135, 'Bundesliga':78, 'Ligue 1':61,
            'Saudi Pro League':307, 'CAF Champions League':12}
@@ -42,6 +66,7 @@ with tab_backtest:
     bt_window = st.slider('Prior games per team', 3, 20, 8, key='bt_window')
     bt_min = st.slider('Minimum prior games per team', 1, 10, 3, key='bt_min')
     bt_limit = st.slider('Maximum recent games to score', 20, 300, 80, step=20, key='bt_limit')
+    ml_compare = st.checkbox('Include Random Forest and XGBoost comparison', value=False, help='Loads additional tools only when selected. Baseline backtesting runs without them.')
     ml_min = st.slider('ML minimum earlier training fixtures', 20, 150, 40, step=10)
     ml_refit = st.slider('ML refit interval (kickoff groups)', 1, 30, 10)
     st.warning('API usage: this backtest may request statistics for EVERY completed fixture in the season, not just the scored fixtures. Check your provider quota before running. Results are cached for 15 minutes.')
@@ -49,6 +74,8 @@ with tab_backtest:
         if not key:
             st.error('Enter your API-FOOTBALL key in the sidebar.')
         else:
+            with st.spinner('Loading prediction tools…'):
+                pd, go, APIError, fixtures, history, result_prediction, count_prediction, completed_fixtures, walk_forward, evaluate = load_tools()
             try:
                 with st.spinner('Loading season fixtures…'):
                     past = completed_fixtures(key, LEAGUES[league_name], int(bt_season))
@@ -85,20 +112,22 @@ with tab_backtest:
                         st.dataframe(back, hide_index=True, use_container_width=True)
                         st.download_button('Download backtest CSV', back.to_csv(index=False).encode('utf-8'), file_name=f'matchedge_backtest_{league_name.replace(" ", "_")}_{bt_season}.csv', mime='text/csv')
                         st.caption('Brier/log loss: lower is better. MAE/RMSE: lower is better. Bias = prediction minus actual. Missing card/corner observations are excluded, not imputed. These are retrospective out-of-sample predictions, not a guarantee of future performance.')
-                        st.markdown('### Model comparison: Poisson vs Random Forest vs XGBoost')
-                        with st.spinner('Training chronological machine-learning models…'):
-                            comparison_rows, comparison_metrics = compare_models(back, min_train=ml_min, refit_every=ml_refit)
-                        if comparison_metrics.empty:
-                            st.info('Not enough earlier matches to train and test the ML models. Increase the backtest sample or lower minimum training fixtures.')
-                        else:
-                            st.dataframe(comparison_metrics, use_container_width=True, hide_index=True)
-                            for metric in ['Result accuracy', 'Multiclass Brier score', 'Corners MAE', 'Cards MAE']:
-                                chart = comparison_metrics[['Model',metric]].dropna()
-                                if not chart.empty:
-                                    st.bar_chart(chart.set_index('Model'), y=metric)
-                            st.download_button('Download comparative predictions CSV', comparison_rows.to_csv(index=False).encode('utf-8'), file_name='matchedge_model_comparison_predictions.csv', mime='text/csv')
-                            st.download_button('Download model comparison metrics CSV', comparison_metrics.to_csv(index=False).encode('utf-8'), file_name='matchedge_model_comparison_metrics.csv', mime='text/csv')
-                            st.caption('All models are compared on the same chronologically eligible fixtures. ML models are refitted using only older kickoff groups. ML cards/corners outputs are point forecasts; over/under probability scores are not reported for those regressors. No hyperparameter tuning on test data.')
+                        if ml_compare:
+                            st.markdown('### Model comparison: Poisson vs Random Forest vs XGBoost')
+                            with st.spinner('Loading and training comparison models…'):
+                                from compare import compare_models
+                                comparison_rows, comparison_metrics = compare_models(back, min_train=ml_min, refit_every=ml_refit)
+                            if comparison_metrics.empty:
+                                st.info('Not enough earlier matches to train and test the ML models. Increase the backtest sample or lower minimum training fixtures.')
+                            else:
+                                st.dataframe(comparison_metrics, use_container_width=True, hide_index=True)
+                                for metric in ['Result accuracy', 'Multiclass Brier score', 'Corners MAE', 'Cards MAE']:
+                                    chart = comparison_metrics[['Model',metric]].dropna()
+                                    if not chart.empty:
+                                        st.bar_chart(chart.set_index('Model'), y=metric)
+                                st.download_button('Download comparative predictions CSV', comparison_rows.to_csv(index=False).encode('utf-8'), file_name='matchedge_model_comparison_predictions.csv', mime='text/csv')
+                                st.download_button('Download model comparison metrics CSV', comparison_metrics.to_csv(index=False).encode('utf-8'), file_name='matchedge_model_comparison_metrics.csv', mime='text/csv')
+                                st.caption('All models are compared on the same chronologically eligible fixtures. ML models are refitted using only older kickoff groups. ML cards/corners outputs are point forecasts; over/under probability scores are not reported for those regressors. No hyperparameter tuning on test data.')
 
             except APIError as exc:
                 st.error(str(exc))
@@ -109,6 +138,8 @@ with tab_forecast:
     elif not key:
         st.error('Enter an API-FOOTBALL key in the sidebar to fetch real data.')
     else:
+        with st.spinner('Loading prediction tools…'):
+            pd, go, APIError, fixtures, history, result_prediction, count_prediction, completed_fixtures, walk_forward, evaluate = load_tools()
         try:
             with st.spinner('Fetching scheduled fixtures…'):
                 games = fixtures(key, LEAGUES[league_name], int(season), selected_date.isoformat())
@@ -205,3 +236,5 @@ with tab_forecast:
 
         st.divider()
         st.caption('Model methodology: recent form shrunk toward generic priors; independent Poisson goals; Poisson card/corner totals. Not backtested or calibrated. Fair odds exclude margin. For research/decision support, not a guarantee of betting outcomes.')
+
+logger.info("MatchEdge: app render finished in %.3fs", perf_counter() - started)
