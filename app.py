@@ -49,10 +49,19 @@ with st.sidebar:
     else:
         key = st.text_input('API-FOOTBALL key', type='password', help='Your own API-Sports v3 key; held only for this session.').strip()
     league_name = st.selectbox('Competition', list(LEAGUES))
-    selected_date = st.date_input('Fixture date', date.today())
+    data_mode = st.selectbox('Data access', ['Historical sample (free plan)', 'Current dates (requires season access)'])
+    default_date = date(2024, 11, 5) if data_mode.startswith('Historical') else date.today()
+    date_text = st.text_input('Fixture date (YYYY-MM-DD)', value=default_date.isoformat(), key='fixture_date_' + data_mode)
+    try:
+        selected_date = date.fromisoformat(date_text.strip())
+    except ValueError:
+        st.error('Enter a valid fixture date in YYYY-MM-DD format, for example 2024-11-05.')
+        st.stop()
+    if data_mode.startswith('Historical'):
+        st.caption('Historical sample: 5 November 2024. Free API plans restrict available seasons; current fixtures may need a paid plan.')
     season = st.number_input('Season start year', min_value=2018, max_value=2035, value=selected_date.year if selected_date.month >= 7 else selected_date.year - 1, step=1)
-    n = st.slider('Recent completed matches per team', 3, 15, 6)
-    max_games = st.slider('Maximum fixtures to analyse', 1, 12, 5)
+    n = st.number_input('Recent completed matches per team', min_value=3, max_value=15, value=3, step=1)
+    max_games = st.number_input('Maximum fixtures to analyse', min_value=1, max_value=12, value=1, step=1)
     st.caption('Each team history loads match-level statistics. API usage can be substantial.')
     run = st.button('🔄 Fetch fixtures & predict', type='primary', use_container_width=True)
     st.divider()
@@ -63,12 +72,12 @@ with tab_backtest:
     st.subheader('Walk-forward historical backtest')
     st.write('Each match is predicted using only earlier completed fixtures in the selected competition. Games at identical kickoff times cannot train one another. Results are evaluated against final scores and observed yellow cards/corners.')
     bt_season = st.number_input('Backtest season start year', min_value=2018, max_value=2035, value=int(season), key='bt_season')
-    bt_window = st.slider('Prior games per team', 3, 20, 8, key='bt_window')
-    bt_min = st.slider('Minimum prior games per team', 1, 10, 3, key='bt_min')
-    bt_limit = st.slider('Maximum recent games to score', 20, 300, 80, step=20, key='bt_limit')
+    bt_window = st.number_input('Prior games per team', min_value=3, max_value=20, value=8, step=1, key='bt_window')
+    bt_min = st.number_input('Minimum prior games per team', min_value=1, max_value=10, value=3, step=1, key='bt_min')
+    bt_limit = st.number_input('Maximum recent games to score', min_value=20, max_value=300, value=80, step=20, key='bt_limit')
     ml_compare = st.checkbox('Include Random Forest and XGBoost comparison', value=False, help='Loads additional tools only when selected. Baseline backtesting runs without them.')
-    ml_min = st.slider('ML minimum earlier training fixtures', 20, 150, 40, step=10)
-    ml_refit = st.slider('ML refit interval (kickoff groups)', 1, 30, 10)
+    ml_min = st.number_input('ML minimum earlier training fixtures', min_value=20, max_value=150, value=40, step=10)
+    ml_refit = st.number_input('ML refit interval (kickoff groups)', min_value=1, max_value=30, value=10, step=1)
     st.warning('API usage: this backtest may request statistics for EVERY completed fixture in the season, not just the scored fixtures. Check your provider quota before running. Results are cached for 15 minutes.')
     if st.button('Run historical backtest', type='primary', key='bt_run'):
         if not key:

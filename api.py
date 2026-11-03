@@ -23,7 +23,13 @@ def fetch(endpoint, params, key):
     if not isinstance(payload, dict):
         raise APIError('Unexpected API-FOOTBALL response format.')
     if payload.get('errors'):
-        raise APIError('API-FOOTBALL rejected this request. Check your subscription coverage and remaining quota.')
+        errors = payload['errors']
+        if isinstance(errors, dict):
+            details = '; '.join(f'{name}: {value}' for name, value in errors.items())
+        else:
+            details = str(errors)
+        details = details.replace(key, '[hidden]')[:500]
+        raise APIError('API-FOOTBALL: ' + details)
     records = payload.get('response')
     if not isinstance(records, list):
         raise APIError('Unexpected API-FOOTBALL data format.')
