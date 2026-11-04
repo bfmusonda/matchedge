@@ -70,7 +70,7 @@ elif not key:
     st.error('Enter an API-FOOTBALL key in the sidebar to fetch real data.')
 else:
     with st.spinner('Loading prediction tools…'):
-        pd, go, APIError, fixtures, history, result_prediction, count_prediction, completed_fixtures, walk_forward, evaluate = load_tools()
+        pd, go, APIError, fixtures, history, result_prediction, count_prediction = load_tools()
     try:
         with st.spinner('Fetching scheduled fixtures…'):
             games = fixtures(key, LEAGUES[league_name], int(season), selected_date.isoformat())
