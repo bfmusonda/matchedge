@@ -1,5 +1,6 @@
 from datetime import date, datetime
 import os
+from hashlib import sha256
 import logging
 from time import perf_counter
 
@@ -63,12 +64,53 @@ with st.sidebar:
     st.divider()
     st.info('No API key? Obtain one at api-football.com. Live and historical coverage depend on your plan.')
 
-if not run:
-    st.markdown('### Ready to analyse')
-    st.write('Choose a competition and fixture date, enter your API key, then click **Fetch fixtures & predict**.')
-elif not key:
+@st.fragment
+def render_match_detail(details):
+    import pandas as pd
+    import plotly.graph_objects as go
+    st.subheader('Match detail')
+    selected = st.selectbox('Select match',list(details))
+    result,corners,cards,hh,aa,hn,an = details[selected]
+    left,right = st.columns([1,1])
+    with left:
+        st.markdown('#### Match outcome probabilities')
+        fig = go.Figure(go.Bar(x=['Home win','Draw','Away win'],y=[100*result['home_win'],100*result['draw'],100*result['away_win']],text=[f'{100*x:.1f}%' for x in [result['home_win'],result['draw'],result['away_win']]],textposition='auto'))
+        fig.update_layout(yaxis_title='Probability (%)',yaxis_range=[0,100],height=330,margin=dict(l=10,r=10,t=15,b=10))
+        st.plotly_chart(fig,use_container_width=True)
+        st.caption(f"Expected goals: {hn} {result['home_goals']:.2f}, {an} {result['away_goals']:.2f}. Most likely score: {result['score']}.")
+    with right:
+        st.markdown('#### Corners & yellow cards')
+        if corners['data_available']:
+            st.metric('Expected total corners',f"{corners['total']:.1f}")
+            st.write(f"{hn}: {corners['home']:.1f} · {an}: {corners['away']:.1f}")
+            st.dataframe(pd.DataFrame({'Market':list(corners['overs']), 'Model probability %':[round(100*v,1) for v in corners['overs'].values()]}),hide_index=True,use_container_width=True)
+        else: st.warning('Insufficient corner statistics for both teams. No corner forecast displayed.')
+        if cards['data_available']:
+            st.metric('Expected yellow cards',f"{cards['total']:.1f}")
+            st.write(f"{hn}: {cards['home']:.1f} · {an}: {cards['away']:.1f}")
+            st.dataframe(pd.DataFrame({'Market':list(cards['overs']), 'Model probability %':[round(100*v,1) for v in cards['overs'].values()]}),hide_index=True,use_container_width=True)
+        else: st.warning('Insufficient yellow-card statistics for both teams. No card forecast displayed.')
+
+    with st.expander('Historical form and data quality'):
+        for team,records in [(hn,hh),(an,aa)]:
+            st.markdown(f'**{team} — {len(records)} completed fixtures**')
+            if records:
+                hdf = pd.DataFrame(records)
+                st.dataframe(hdf[['date','opponent','home','gf','ga','corners_for','corners_against','cards_for','cards_against']],use_container_width=True,hide_index=True)
+            else: st.caption('No recent results returned for this team.')
+        st.caption('Historical fixtures can include other competitions. Counts are raw fixture statistics; API completeness varies.')
+
+    st.divider()
+    st.caption('Model methodology: recent form shrunk toward generic priors; independent Poisson goals; Poisson card/corner totals. Not backtested or calibrated. Fair odds exclude margin. For research/decision support, not a guarantee of betting outcomes.')
+
+signature = (league_name, selected_date.isoformat(), int(season), int(n), int(max_games), sha256(key.encode()).hexdigest())
+if st.session_state.get('forecast_signature') != signature:
+    st.session_state.pop('forecast_results', None)
+    st.session_state['forecast_signature'] = signature
+
+if run and not key:
     st.error('Enter an API-FOOTBALL key in the sidebar to fetch real data.')
-else:
+elif run:
     with st.spinner('Loading prediction tools…'):
         pd, go, APIError, fixtures, history, result_prediction, count_prediction = load_tools()
     try:
@@ -124,6 +166,12 @@ else:
     if not rows:
         st.error('No predictions could be calculated. Check your API quota and season access.'); st.stop()
 
+    st.session_state['forecast_results'] = {'rows': rows, 'details': details}
+
+saved = st.session_state.get('forecast_results')
+if saved:
+    pd, go, APIError, fixtures, history, result_prediction, count_prediction = load_tools()
+    rows, details = saved['rows'], saved['details']
     df = pd.DataFrame(rows)
     a,b,c = st.columns(3)
     a.metric('Fixtures analysed',len(df))
@@ -133,39 +181,9 @@ else:
     st.dataframe(df, use_container_width=True, hide_index=True)
     st.download_button('⬇ Download predictions CSV',df.to_csv(index=False).encode('utf-8'),file_name=f'matchedge_{selected_date}.csv',mime='text/csv')
 
-    st.subheader('Match detail')
-    selected = st.selectbox('Select match',list(details))
-    result,corners,cards,hh,aa,hn,an = details[selected]
-    left,right = st.columns([1,1])
-    with left:
-        st.markdown('#### Match outcome probabilities')
-        fig = go.Figure(go.Bar(x=['Home win','Draw','Away win'],y=[100*result['home_win'],100*result['draw'],100*result['away_win']],text=[f'{100*x:.1f}%' for x in [result['home_win'],result['draw'],result['away_win']]],textposition='auto'))
-        fig.update_layout(yaxis_title='Probability (%)',yaxis_range=[0,100],height=330,margin=dict(l=10,r=10,t=15,b=10))
-        st.plotly_chart(fig,use_container_width=True)
-        st.caption(f"Expected goals: {hn} {result['home_goals']:.2f}, {an} {result['away_goals']:.2f}. Most likely score: {result['score']}.")
-    with right:
-        st.markdown('#### Corners & yellow cards')
-        if corners['data_available']:
-            st.metric('Expected total corners',f"{corners['total']:.1f}")
-            st.write(f"{hn}: {corners['home']:.1f} · {an}: {corners['away']:.1f}")
-            st.dataframe(pd.DataFrame({'Market':list(corners['overs']), 'Model probability %':[round(100*v,1) for v in corners['overs'].values()]}),hide_index=True,use_container_width=True)
-        else: st.warning('Insufficient corner statistics for both teams. No corner forecast displayed.')
-        if cards['data_available']:
-            st.metric('Expected yellow cards',f"{cards['total']:.1f}")
-            st.write(f"{hn}: {cards['home']:.1f} · {an}: {cards['away']:.1f}")
-            st.dataframe(pd.DataFrame({'Market':list(cards['overs']), 'Model probability %':[round(100*v,1) for v in cards['overs'].values()]}),hide_index=True,use_container_width=True)
-        else: st.warning('Insufficient yellow-card statistics for both teams. No card forecast displayed.')
-
-    with st.expander('Historical form and data quality'):
-        for team,records in [(hn,hh),(an,aa)]:
-            st.markdown(f'**{team} — {len(records)} completed fixtures**')
-            if records:
-                hdf = pd.DataFrame(records)
-                st.dataframe(hdf[['date','opponent','home','gf','ga','corners_for','corners_against','cards_for','cards_against']],use_container_width=True,hide_index=True)
-            else: st.caption('No recent results returned for this team.')
-        st.caption('Historical fixtures can include other competitions. Counts are raw fixture statistics; API completeness varies.')
-
-    st.divider()
-    st.caption('Model methodology: recent form shrunk toward generic priors; independent Poisson goals; Poisson card/corner totals. Not backtested or calibrated. Fair odds exclude margin. For research/decision support, not a guarantee of betting outcomes.')
+    render_match_detail(details)
+else:
+    st.markdown('### Ready to analyse')
+    st.write('Choose a competition and fixture date, then click **Fetch fixtures & predict**.')
 
 logger.info("MatchEdge: app render finished in %.3fs", perf_counter() - started)
