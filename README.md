@@ -28,15 +28,6 @@ Get an API key at https://www.api-football.com/ . API coverage, request quotas, 
 - API data can be delayed or corrected. Yellow cards are match-statistic counts, not disciplinary booking points.
 - The app does not place bets, guarantee profits, or automatically update when closed.
 
-## Historical backtesting (new)
-Open the **Historical backtesting** tab. Select a season, prior-games window, minimum prior history and evaluation limit, then run. The test scores the most recent selected fixtures but processes the full selected season chronologically to build earlier training histories. Matches sharing the same exact kickoff timestamp are predicted before any of their outcomes are added to history. This avoids look-ahead leakage. The backtest computes result accuracy, multiclass Brier score, log loss, confusion matrix, cards/corners MAE, RMSE, bias, and over-line Brier scores, plus per-match CSV export. Missing statistics are excluded from count metrics. No API key is bundled. API usage may be high because match statistics are requested for all completed fixtures in the selected season. The backtest is **within-season** only and has no prior-season warm-up; early fixtures with insufficient prior history are skipped. Models use fixed priors and are not fitted on the test set.
 
-## Three-model chronological comparison
-
-The Historical backtesting tab now compares the existing Poisson baseline with Random Forest and XGBoost for 1X2 outcomes, yellow-card totals, and corner totals. Each match's ML features are derived from prior team matches only. An expanding training window uses only earlier kickoff timestamps, with configurable minimum training size and refit interval. All three models are scored on identical eligible fixtures and observed count subsets. Metrics include result accuracy, multiclass Brier score/log loss, corners/cards MAE, RMSE, and bias; the baseline additionally reports over-line Brier scores. The regressors provide count estimates **not** calibrated over/under probabilities. Download both the per-match comparison and summary CSV. ML training begins after enough within-season eligible historical games are available; increase the maximum scored fixtures to obtain more test samples. This is an exploratory comparison with fixed model hyperparameters, not a tuned or validated betting system. Never use same-season test performance to select hyperparameters and report it as unbiased final performance; reserve a later season for final evaluation.
-
-Note: This release uses the selected season only, without prior-season warm-up, and requires API match-statistics coverage. Predictions and historical accuracy cannot be populated without live API access. Local smoke testing used synthetic records and does not represent real-world model accuracy.
-
-## Deployment and tests
-
-See `DEPLOYMENT.md` for secure hosting instructions. Run `python -m pytest -q tests` after installing requirements. The app now excludes historical matches played at or after each target kickoff when computing form. This avoids hindsight in date-based forecasts. This release has not been validated with live provider credentials or deployed.
+## Current app
+The hosted app provides fixture predictions only. The historical sample selector, historical backtesting tab, and model comparison interface have been removed. Prediction tools load only after a request. API coverage depends on the configured subscription.
